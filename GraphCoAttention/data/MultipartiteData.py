@@ -18,13 +18,13 @@ class BipartitePairData(tg.data.Data):
             self.outer_edge_index_i, self.outer_edge_index_j = self.generate_outer()
 
     def __inc__(self, key, value):
-        if key == 'edge_index_i':
+        if key == 'inner_edge_index_i':
             return self.x_i.size(0)
-        if key == 'edge_index_j':
+        if key == 'inner_edge_index_j':
             return self.x_j.size(0)
-        if key == 'bipartite_edge_index_i':
+        if key == 'outer_edge_index_i':
             return torch.tensor([[self.x_i.size(0)], [self.x_j.size(0)]])
-        if key == 'bipartite_edge_index_j':
+        if key == 'outer_edge_index_j':
             return torch.tensor([[self.x_j.size(0)], [self.x_i.size(0)]])
         else:
             return super(BipartitePairData, self).__inc__(key, value)
