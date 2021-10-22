@@ -1,4 +1,5 @@
 import torch
+from torch import nn
 from torch.nn import Parameter
 
 from GraphCoAttention.data.MultipartiteData import BipartitePairData
@@ -18,26 +19,45 @@ class CoAttention(torch.nn.Module):
         readout (Module): The readout function :math:`\mathcal{R}`.
     """
 
-    def __init__(self, hidden_channels, inner, outer, update, readout):
+    def __init__(self, hidden_channels: int,  encoder: nn.Module,
+                 inner: nn.Module, outer: nn.Module,
+                 update: nn.Module, readout: nn.Module,
+                 n_cycles: int = 2):
         super(CoAttention, self).__init__()
         self.hidden_channels = hidden_channels
-        self.inner_i, self.inner_j = inner, inner
-        self.outer_i, self.outer_j = outer, outer
-        self.update_i, self.update_j = update, update
+        self.n_cycles = n_cycles
+
+        # Initial Dimensionality Expansion
+        self.encoder_i, self.encoder_j = encoder, encoder
+        # Inner Modules * Number of Cycles
+        self.inner_i = nn.ModuleList([inner for i in range(n_cycles)])
+        self.inner_j = nn.ModuleList([inner for i in range(n_cycles)])
+        # Outer Modules * Number of Cycles
+        self.outer_i = nn.ModuleList([outer for i in range(n_cycles)])
+        self.outer_j = nn.ModuleList([outer for i in range(n_cycles)])
+        # Update Function * Number of Cycles
+        self.update_i = nn.ModuleList([update for i in range(n_cycles)])
+        self.update_j = nn.ModuleList([update for i in range(n_cycles)])
+        # Readouts
+        # self.readout_i = readout
+        # self.readout_j = readout
         self.readout = readout
 
         self.weight = Parameter(torch.Tensor(hidden_channels, hidden_channels))
 
     def forward(self, data: BipartitePairData, *args, **kwargs):
 
-        m_i = self.inner_i(x=data.x_i, edge_index=data.inner_edge_index_i)
-        m_j = self.inner_j(x=data.x_j, edge_index=data.inner_edge_index_j)
-        a_ij = self.outer_i(x=(data.x_j, data.x_i), edge_index=data.outer_edge_index_j)
-        a_ji = self.outer_j(x=(data.x_i, data.x_j), edge_index=data.outer_edge_index_i)
+        x_i = self.encoder_i(x=data.x_i.float(), edge_index=data.inner_edge_index_i)
+        x_j = self.encoder_j(x=data.x_j.float(), edge_index=data.inner_edge_index_j)
 
-        i = self.update_i(m_i, a_ij)
-        j = self.update_j(m_j, a_ji)
+        for index in range(self.n_cycles):
+            m_i = self.inner_i[index](x=x_i, edge_index=data.inner_edge_index_i)
+            m_j = self.inner_j[index](x=x_j, edge_index=data.inner_edge_index_j)
+            a_ij = self.outer_i[index](x=(x_j, x_i), edge_index=data.outer_edge_index_j)
+            a_ji = self.outer_j[index](x=(x_i, x_j), edge_index=data.outer_edge_index_i)
+            x_i = self.update_i[index](torch.cat((m_i, a_ij), dim=1))
+            x_j = self.update_j[index](torch.cat((m_j, a_ji), dim=1))
 
-        logits = self.readout(i, j)
+        logits = self.readout(torch.cat((x_i, x_j), dim=0))
 
         return logits
