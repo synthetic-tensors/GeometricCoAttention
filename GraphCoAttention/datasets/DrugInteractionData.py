@@ -145,6 +145,6 @@ class DrugDrugInteractionData(tg.data.InMemoryDataset, ABC):
 
 
 if __name__ == '__main__':
-    dataset = DrugDrugInteractionData(root=os.path.join('GraphCoAttention', 'data'))
+    dataset = DrugDrugInteractionData(root=os.path.join('..', 'GraphCoAttention', 'data'))
     
     
