@@ -1,10 +1,13 @@
 import os
 import torch
 import wget
+import itertools
+import random
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
 from abc import ABC, ABCMeta
+from retrying import retry
 
 from ogb.utils.url import decide_download, download_url, extract_zip
 import ogb.utils.mol as mol
@@ -27,7 +30,7 @@ class DrugDrugInteractionData(tg.data.InMemoryDataset, ABC):
 
     @property
     def processed_file_names(self):
-        return 'decagon.pt'
+        return 'decagon_ps_ns_10000.pt'
 
     def download(self):
         if decide_download(self.url):
@@ -54,28 +57,68 @@ class DrugDrugInteractionData(tg.data.InMemoryDataset, ABC):
         outer_edge_index_j = torch.cartesian_prod(bottom, top).T
         return outer_edge_index_i, outer_edge_index_j
 
-    def process(self):
+    @retry(wait_random_min=3000, wait_random_max=4000)
+    def pubchem_cid_smiles(self, cid_i, cid_j):
         import pubchempy as pcp
+        mol_i = pcp.Compound.from_cid(int(cid_i.strip('CID'))).isomeric_smiles
+        mol_j = pcp.Compound.from_cid(int(cid_j.strip('CID'))).isomeric_smiles
+        return mol_i, mol_j
+
+    def process(self):
 
         df = pd.read_csv(self.raw_paths[0], compression='gzip', header=0, encoding="ISO-8859-1", error_bad_lines=False)
+
+        print(df)
+
         records = df.to_records(index=False)
-        raw_tuple = list(records)[:10000]
+        raw_tuple = list(records)  # [:10]
+
+        nondup_tupple = set()
+        for cid_i, cid_j, label, name in tqdm(raw_tuple):
+            nondup_tupple.add(tuple((cid_i, cid_j)))
+
+        nondup_tupple = list(nondup_tupple)[:10000]
 
         data_list = []
-        for cid_i, cid_j, label, name in tqdm(raw_tuple):
-            mol_i = pcp.Compound.from_cid(int(cid_i.strip('CID'))).isomeric_smiles
-            mol_j = pcp.Compound.from_cid(int(cid_j.strip('CID'))).isomeric_smiles
+        pos = {}
+        data_tuples = []
 
+        # Generate PyG representations of molecules
+        for cid_i, cid_j in tqdm(nondup_tupple):
+            mol_i, mol_j = self.pubchem_cid_smiles(cid_i, cid_j)
             data_i, data_j = self.mol2pyg(mol_i), self.mol2pyg(mol_j)
+            data_tuples.append((data_i, data_j))
+            pos[data_i] = data_j
+            pos[data_j] = data_i
+
+        pyg_molecules = list(itertools.chain.from_iterable(data_tuples))
+
+        # Positive Sample
+        for data_i, data_j in tqdm(data_tuples):
             outer_edge_index_i, outer_edge_index_j = self.generate_outer(data_i.x.size(0), data_j.x.size(0))
 
             data = BipartitePairData(x_i=data_i.x, x_j=data_j.x,
                                      inner_edge_index_i=data_i.edge_index,
                                      inner_edge_index_j=data_j.edge_index,
                                      outer_edge_index_i=outer_edge_index_i,
-                                     outer_edge_index_j=outer_edge_index_j)
+                                     outer_edge_index_j=outer_edge_index_j,
+                                     # y=torch.tensor([int(label.strip('C'))], dtype=torch.long),
+                                     binary_y=torch.tensor([int(1)], dtype=torch.long))
 
-            data.y = torch.tensor([int(label.strip('C'))], dtype=torch.long)
+            data_list.append(data)
+
+        # Negative Sample
+        for mol_data in tqdm(pyg_molecules):
+            mol_i = mol_data
+            mol_j = random.choice(pyg_molecules)
+
+            outer_edge_index_i, outer_edge_index_j = self.generate_outer(mol_i.x.size(0), mol_j.x.size(0))
+            data = BipartitePairData(x_i=mol_i.x, x_j=mol_j.x,
+                                     inner_edge_index_i=mol_i.edge_index,
+                                     inner_edge_index_j=mol_j.edge_index,
+                                     outer_edge_index_i=outer_edge_index_i,
+                                     outer_edge_index_j=outer_edge_index_j,
+                                     binary_y=torch.tensor([int(0)], dtype=torch.long))
 
             data_list.append(data)
 
@@ -96,7 +139,7 @@ class DrugDrugInteractionData(tg.data.InMemoryDataset, ABC):
             data_list=data_list,
             increment=False,
             add_batch=False,
-            # follow_batch=['x_i', 'x_j']
+            follow_batch=['x_i', 'x_j']
         )
         return data, slices
 

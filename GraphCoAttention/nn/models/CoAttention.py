@@ -1,6 +1,7 @@
 import torch
 from torch import nn
 from torch.nn import Parameter
+from torch.nn import functional as F
 
 from GraphCoAttention.data.MultipartiteData import BipartitePairData
 
@@ -43,7 +44,7 @@ class CoAttention(torch.nn.Module):
         # self.readout_j = readout
         self.readout = readout
 
-        self.weight = Parameter(torch.Tensor(hidden_channels, hidden_channels))
+        # self.weight = Parameter(torch.Tensor(hidden_channels, hidden_channels))
 
     def forward(self, data: BipartitePairData, *args, **kwargs):
 
@@ -53,10 +54,21 @@ class CoAttention(torch.nn.Module):
         for index in range(self.n_cycles):
             m_i = self.inner_i[index](x=x_i, edge_index=data.inner_edge_index_i)
             m_j = self.inner_j[index](x=x_j, edge_index=data.inner_edge_index_j)
+
+            m_i = F.leaky_relu(m_i)
+            m_j = F.leaky_relu(m_j)
+
             a_ij = self.outer_i[index](x=(x_j, x_i), edge_index=data.outer_edge_index_j)
             a_ji = self.outer_j[index](x=(x_i, x_j), edge_index=data.outer_edge_index_i)
+
+            a_ij = F.leaky_relu(a_ij)
+            a_ji = F.leaky_relu(a_ji)
+
             x_i = self.update_i[index](torch.cat((m_i, a_ij), dim=1))
             x_j = self.update_j[index](torch.cat((m_j, a_ji), dim=1))
+
+            x_i = F.leaky_relu(x_i)
+            x_j = F.leaky_relu(x_j)
 
         logits = self.readout(torch.cat((x_i, x_j), dim=0))
 
