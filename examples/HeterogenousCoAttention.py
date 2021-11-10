@@ -10,18 +10,22 @@ import torch_geometric as tg
 import torchmetrics
 from pytorch_lightning.loggers.wandb import WandbLogger
 
-from GraphCoAttention.datasets.DrugInteractionData import DrugDrugInteractionData
+from GraphCoAttention.datasets.HeterogenousDDI import HeteroDrugDrugInteractionData
 from GraphCoAttention.nn.models.CoAttention import CoAttention
+from GraphCoAttention.nn.models.HeterogenousCoAttention import HeteroGNN
 from GraphCoAttention.nn.conv.GATConv import GATConv
 
 
 class Learner(pl.LightningModule):
-    def __init__(self, root_dir, hidden_dim=5, n_cycles=16, n_head=1, dropout=0.1, lr=0.001, bs=2):
+    def __init__(self, root_dir, hidden_dim=5, n_cycles=16, n_head=1, dropout=0.1, lr=0.001, bs=1):
         super().__init__()
         self.root_dir = root_dir
 
-        self.dataset = DrugDrugInteractionData(root=self.root_dir)
+        self.dataset = HeteroDrugDrugInteractionData(root=self.root_dir)
         self.dataset = self.dataset.shuffle()
+
+        print(self.dataset[0])
+        # exit()
 
         self.num_workers = 1
         self.n_cycles = n_cycles
@@ -30,7 +34,7 @@ class Learner(pl.LightningModule):
         self.batch_size = bs
         self.lr = lr
 
-        self.num_features = self.dataset.num_features
+        # self.num_features = self.dataset.num_features
         self.hidden_dim = hidden_dim
 
         wandb.config.hidden_dim = self.hidden_dim
@@ -38,30 +42,37 @@ class Learner(pl.LightningModule):
         wandb.config.n_head = self.n_head
         wandb.config.dropout = self.dropout
 
-        self.encoder = GATConv(self.num_features, self.hidden_dim, heads=self.n_head, dropout=self.dropout)
-        
-        self.inner = GATConv(self.hidden_dim*self.n_head, self.hidden_dim, heads=self.n_head,
-                             add_self_loops=True, bipartite=False, dropout=self.dropout)
-        self.outer = GATConv(self.hidden_dim*self.n_head, self.hidden_dim, heads=self.n_head, add_self_loops=True,
-                             concat=False, bipartite=True, dropout=self.dropout)
+        # self.encoder = GATConv(self.num_features, self.hidden_dim, heads=self.n_head, dropout=self.dropout)
+        #
+        # self.inner = GATConv(self.hidden_dim * self.n_head, self.hidden_dim, heads=self.n_head,
+        #                      add_self_loops=True, bipartite=False, dropout=self.dropout)
+        # self.outer = GATConv(self.hidden_dim * self.n_head, self.hidden_dim, heads=self.n_head, add_self_loops=True,
+        #                      concat=False, bipartite=True, dropout=self.dropout)
+        #
+        # self.update = tg.nn.dense.Linear(self.hidden_dim * self.n_head + self.hidden_dim, self.hidden_dim * self.n_head)
+        # # self.update = GATConv(self.hidden_dim*self.n_head+self.hidden_dim, self.hidden_dim, heads=self.n_head,
+        # #                       add_self_loops=True, bipartite=False, dropout=self.dropout)
+        #
+        # self.readout = tg.nn.dense.Linear(in_channels=2 * self.hidden_dim, out_channels=1)
+        # # self.readout = GATConv(self.hidden_dim*self.n_head, self.hidden_dim, heads=1,
+        # #                        add_self_loops=True, bipartite=False, dropout=self.dropout)
 
-        self.update = tg.nn.dense.Linear(self.hidden_dim*self.n_head+self.hidden_dim, self.hidden_dim*self.n_head)
-        # self.update = GATConv(self.hidden_dim*self.n_head+self.hidden_dim, self.hidden_dim, heads=self.n_head,
-        #                       add_self_loops=True, bipartite=False, dropout=self.dropout)
+        self.HeterogenousCoAttention = HeteroGNN(hidden_channels=self.hidden_dim, out_channels=1, num_layers=5)
 
-        self.readout = tg.nn.dense.Linear(in_channels=2*self.hidden_dim, out_channels=1)
-        # self.readout = GATConv(self.hidden_dim*self.n_head, self.hidden_dim, heads=1,
-        #                        add_self_loops=True, bipartite=False, dropout=self.dropout)
-
-        self.CoAttention = CoAttention(hidden_channels=self.hidden_dim, encoder=self.encoder,
-                                       outer=self.outer, inner=self.inner,
-                                       update=self.update, readout=self.readout,
-                                       n_cycles=self.n_cycles, batch_size=self.batch_size, n_head=self.n_head)
+        # self.CoAttention = CoAttention(hidden_channels=self.hidden_dim, encoder=self.encoder,
+        #                                outer=self.outer, inner=self.inner,
+        #                                update=self.update, readout=self.readout,
+        #                                n_cycles=self.n_cycles, batch_size=self.batch_size, n_head=self.n_head)
 
         self.bce_loss = torch.nn.BCEWithLogitsLoss()
 
     def forward(self, data, *args, **kwargs):
-        logits = self.CoAttention(data)
+
+        print(data)
+        exit()
+
+        logits = self.HeterogenousCoAttention()
+        # logits = self.CoAttention(data)
         # logits = torch.sigmoid(torch.mean(logits))
         return logits
 
@@ -100,12 +111,12 @@ class Learner(pl.LightningModule):
         return [optimizer], [scheduler]
 
     def train_dataloader(self):
-        return tg.data.DataLoader(self.dataset, batch_size=self.batch_size, follow_batch=['x_i', 'x_j'],
-                                  num_workers=self.num_workers, pin_memory=False, shuffle=True)
+        return tg.loader.DataLoader(self.dataset, batch_size=self.batch_size,
+                                    num_workers=self.num_workers, pin_memory=False, shuffle=True)
 
     def val_dataloader(self):
-        return tg.data.DataLoader(self.dataset, batch_size=self.batch_size, follow_batch=['x_i', 'x_j'],
-                                  num_workers=self.num_workers, pin_memory=False, shuffle=True)
+        return tg.loader.DataLoader(self.dataset, batch_size=self.batch_size,
+                                    num_workers=self.num_workers, pin_memory=False, shuffle=True)
 
 
 if __name__ == '__main__':
@@ -113,4 +124,4 @@ if __name__ == '__main__':
     data_dir = os.path.join('GraphCoAttention', 'data')
     wandb_logger = WandbLogger(project='flux', log_model='all')
     trainer = pl.Trainer(gpus=[0], max_epochs=2000, check_val_every_n_epoch=500, accumulate_grad_batches=50)
-    trainer.fit(Learner(data_dir, bs=2))
+    trainer.fit(Learner(data_dir, bs=1))

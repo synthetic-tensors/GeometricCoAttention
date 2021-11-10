@@ -3,9 +3,41 @@ from torch import nn
 from torch.nn import Parameter
 from torch.nn import functional as F
 import torch_geometric as tg
+
+from torch_geometric.nn import GATConv, HeteroConv, Linear
 from torch_geometric.nn.glob import global_mean_pool
 
 from GraphCoAttention.data.MultipartiteData import BipartitePairData
+
+
+class HeteroGNN(torch.nn.Module):
+    def __init__(self, hidden_channels, out_channels, num_layers):
+        super().__init__()
+
+        self.hidden_channels = hidden_channels
+        self.convs = torch.nn.ModuleList()
+        for _ in range(num_layers):
+            conv = HeteroConv({
+                ('x_i', 'inner_edge_i', 'x_i'): GATConv((-1, -1), self.hidden_channels),
+                ('x_j', 'inner_edge_j', 'x_j'): GATConv((-1, -1), self.hidden_channels),
+                ('x_i', 'outer_edge_ij', 'x_j'): GATConv((-1, -1), self.hidden_channels),
+                ('x_j', 'outer_edge_ji', 'x_i'): GATConv((-1, -1), self.hidden_channels),
+                ('x_i', 'inner_edge_i', 'x_i'): GATConv((-1, -1), self.hidden_channels),
+                ('x_j', 'inner_edge_j', 'x_j'): GATConv((-1, -1), self.hidden_channels),
+            }, aggr='sum')
+            self.convs.append(conv)
+
+        self.lin = Linear(hidden_channels, out_channels)
+
+    def forward(self, x_dict, edge_index_dict):
+        for conv in self.convs:
+            x_dict = conv(x_dict, edge_index_dict)
+            x_dict = {key: x.relu() for key, x in x_dict.items()}
+
+            print(x_dict)
+            exit()
+
+        return self.lin(x_dict['author'])
 
 
 class CoAttention(torch.nn.Module):

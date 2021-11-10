@@ -19,6 +19,8 @@ class BipartitePairData(tg.data.Data):
         self.x_i = x_i
         self.x_j = x_j
 
+        # self.num_nodes = int(x_i.size(0) + x_j.size(0))
+
         self.inner_edge_index_i = inner_edge_index_i
         self.inner_edge_index_j = inner_edge_index_j
 

@@ -18,11 +18,11 @@ from torch_geometric.data.collate import collate
 from GraphCoAttention.data.MultipartiteData import BipartitePairData
 
 
-class DrugDrugInteractionData(tg.data.InMemoryDataset, ABC):
+class HeteroDrugDrugInteractionData(tg.data.InMemoryDataset, ABC):
     def __init__(self, root):
         self.url = 'http://snap.stanford.edu/decagon/bio-decagon-combo.tar.gz'
         self.original_root = root
-        super(DrugDrugInteractionData, self).__init__(root=root)
+        super(HeteroDrugDrugInteractionData, self).__init__(root=root)
 
         run = wandb.init(entity="syntensor", project="flux")
         ordinal_artifact = run.use_artifact('syntensor/flux/drug-drug-interaction:latest', type='dataset')
@@ -37,7 +37,7 @@ class DrugDrugInteractionData(tg.data.InMemoryDataset, ABC):
 
     @property
     def processed_file_names(self):
-        return 'decagon_ps_ns_full.pt'
+        return 'heterogenous_decagon_ps_ns_.pt'
 
     def download(self):
         if decide_download(self.url):
@@ -78,7 +78,7 @@ class DrugDrugInteractionData(tg.data.InMemoryDataset, ABC):
         print(df)
 
         records = df.to_records(index=False)
-        raw_tuple = list(records)  # [:20]
+        raw_tuple = list(records)  # [:1000]
 
         label_dict = {}
         nondup_tupple = set()
@@ -86,7 +86,7 @@ class DrugDrugInteractionData(tg.data.InMemoryDataset, ABC):
             nondup_tupple.add(tuple((cid_i, cid_j)))
             label_dict[tuple((cid_i, cid_j))] = label
 
-        nondup_tupple = list(nondup_tupple)
+        nondup_tupple = list(nondup_tupple)[:1000]
 
         data_list = []
         data_tuples = []
@@ -108,15 +108,18 @@ class DrugDrugInteractionData(tg.data.InMemoryDataset, ABC):
         for data_i, data_j in tqdm(data_tuples):
             label = data_label_dict[tuple((data_i, data_j))]
             outer_edge_index_i, outer_edge_index_j = self.generate_outer(data_i.x.size(0), data_j.x.size(0))
+            data = tg.data.HeteroData()
+            data['x_i'].x = data_i.x
+            data['x_j'].x = data_j.x
+            data['x_i', 'inner_edge_i', 'x_i'].edge_index = data_i.edge_index
+            data['x_i', 'inner_edge_i', 'x_i'].edge_attr = data_i.edge_attr
+            data['x_j', 'inner_edge_j', 'x_j'].edge_index = data_j.edge_index
+            data['x_j', 'inner_edge_j', 'x_j'].edge_attr = data_j.edge_attr
+            data['x_i', 'outer_edge_ij', 'x_j'].edge_index = outer_edge_index_i
+            data['x_j', 'outer_edge_ji', 'x_i'].edge_index = outer_edge_index_j
 
-            data = BipartitePairData(x_i=data_i.x, x_j=data_j.x,
-                                     inner_edge_index_i=data_i.edge_index,
-                                     inner_edge_index_j=data_j.edge_index,
-                                     outer_edge_index_i=outer_edge_index_i,
-                                     outer_edge_index_j=outer_edge_index_j,
-                                     y=torch.tensor([int(label.strip('C'))], dtype=torch.long),
-                                     binary_y=torch.tensor([int(1)], dtype=torch.long))
-
+            data.y = torch.tensor([int(label.strip('C'))], dtype=torch.long)
+            data.binary_y = torch.tensor([int(1)], dtype=torch.long)
             data_list.append(data)
 
         # Negative Sample
@@ -124,44 +127,32 @@ class DrugDrugInteractionData(tg.data.InMemoryDataset, ABC):
             mol_i, mol_j = random.choice(pyg_molecules), random.choice(pyg_molecules)
             outer_edge_index_i, outer_edge_index_j = self.generate_outer(mol_i.x.size(0), mol_j.x.size(0))
 
-            data = BipartitePairData(x_i=mol_i.x, x_j=mol_j.x,
-                                     inner_edge_index_i=mol_i.edge_index,
-                                     inner_edge_index_j=mol_j.edge_index,
-                                     outer_edge_index_i=outer_edge_index_i,
-                                     outer_edge_index_j=outer_edge_index_j,
-                                     y=torch.tensor([int(0)], dtype=torch.long),
-                                     binary_y=torch.tensor([int(0)], dtype=torch.long))
+            data = tg.data.HeteroData()
+            data['x_i'].x = data_i.x
+            data['x_j'].x = data_j.x
+            data['x_i', 'inner_edge_i', 'x_i'].edge_index = data_i.edge_index
+            data['x_i', 'inner_edge_i', 'x_i'].edge_attr = data_i.edge_attr
+            data['x_j', 'inner_edge_j', 'x_j'].edge_index = data_j.edge_index
+            data['x_j', 'inner_edge_j', 'x_j'].edge_attr = data_j.edge_attr
+            data['x_i', 'outer_edge_ij', 'x_j'].edge_index = outer_edge_index_i
+            data['x_j', 'outer_edge_ji', 'x_i'].edge_index = outer_edge_index_j
 
+            data.y = torch.tensor([int(label.strip('C'))], dtype=torch.long)
+            data.binary_y = torch.tensor([int(1)], dtype=torch.long)
             data_list.append(data)
 
         data, slices = self.collate(data_list)
         print('Saving...')
         torch.save((data, slices), self.processed_paths[0])
 
-    @staticmethod
-    def collate(data_list):
-        r"""Collates a Python list of :obj:`torch_geometric.data.Data` objects
-        to the internal storage format of
-        :class:`~torch_geometric.data.InMemoryDataset`."""
-        if len(data_list) == 1:
-            return data_list[0], None
-
-        data, slices, _ = collate(
-            data_list[0].__class__,
-            data_list=data_list,
-            increment=False,
-            add_batch=False,
-            follow_batch=['x_i', 'x_j']
-        )
-        return data, slices
-
 
 if __name__ == '__main__':
     import wandb
-    dataset = DrugDrugInteractionData(root=os.path.join('GraphCoAttention', 'data'))
+
+    dataset = HeteroDrugDrugInteractionData(root=os.path.join('GraphCoAttention', 'data'))
     run = wandb.init(project="flux", entity="syntensor", job_type="dataset-creation")
     artifact = wandb.Artifact('drug-drug-interaction', type='dataset')
     artifact.add_reference('s3://syntensor-data/processed')
-    artifact.add_file(os.path.join(os.path.join('GraphCoAttention', 'data', 'processed'), 'decagon_ps_ns_full.pt'))
+    artifact.add_file(os.path.join(os.path.join('GraphCoAttention', 'data', 'processed'),
+                                   'heterogenous_decagon_ps_ns_.pt'))
     run.log_artifact(artifact)
-    
