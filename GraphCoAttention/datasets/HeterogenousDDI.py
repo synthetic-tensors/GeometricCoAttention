@@ -37,7 +37,7 @@ class HeteroDrugDrugInteractionData(tg.data.InMemoryDataset, ABC):
 
     @property
     def processed_file_names(self):
-        return 'heterogenous_decagon_ps_ns_.pt'
+        return 'heterogenous_decagon_ps_ns_V3.pt'
 
     def download(self):
         if decide_download(self.url):
@@ -52,8 +52,8 @@ class HeteroDrugDrugInteractionData(tg.data.InMemoryDataset, ABC):
         data = tg.data.Data()
         data.__num_nodes__ = int(graph['num_nodes'])
         data.edge_index = torch.from_numpy(graph['edge_index']).to(torch.int64)
-        data.edge_attr = torch.from_numpy(graph['edge_feat']).to(torch.int64)
-        data.x = torch.from_numpy(graph['node_feat']).to(torch.int64)
+        data.edge_attr = torch.from_numpy(graph['edge_feat']).float()
+        data.x = torch.from_numpy(graph['node_feat']).float()
         return data
 
     @staticmethod
@@ -109,36 +109,47 @@ class HeteroDrugDrugInteractionData(tg.data.InMemoryDataset, ABC):
             label = data_label_dict[tuple((data_i, data_j))]
             outer_edge_index_i, outer_edge_index_j = self.generate_outer(data_i.x.size(0), data_j.x.size(0))
             data = tg.data.HeteroData()
-            data['x_i'].x = data_i.x
-            data['x_j'].x = data_j.x
-            data['x_i', 'inner_edge_i', 'x_i'].edge_index = data_i.edge_index
-            data['x_i', 'inner_edge_i', 'x_i'].edge_attr = data_i.edge_attr
-            data['x_j', 'inner_edge_j', 'x_j'].edge_index = data_j.edge_index
-            data['x_j', 'inner_edge_j', 'x_j'].edge_attr = data_j.edge_attr
-            data['x_i', 'outer_edge_ij', 'x_j'].edge_index = outer_edge_index_i
-            data['x_j', 'outer_edge_ji', 'x_i'].edge_index = outer_edge_index_j
+            data['x_i'].x = data_i.x.float()
+            data['x_j'].x = data_j.x.float()
+            data['x_i', 'inner_edge_i', 'x_i'].edge_index = data_i.edge_index.long()
+            data['x_i', 'inner_edge_i', 'x_i'].edge_attr = data_i.edge_attr.float()
+            data['x_j', 'inner_edge_j', 'x_j'].edge_index = data_j.edge_index.long()
+            data['x_j', 'inner_edge_j', 'x_j'].edge_attr = data_j.edge_attr.float()
 
-            data.y = torch.tensor([int(label.strip('C'))], dtype=torch.long)
+            data['x_i', 'outer_edge_ij', 'x_j'].edge_index = outer_edge_index_i.long()
+            data['x_j', 'outer_edge_ji', 'x_i'].edge_index = outer_edge_index_j.long()
+            data['x_i', 'outer_edge_ij', 'x_j'].edge_attr = torch.ones(size=(outer_edge_index_i.max()+1,
+                                                                             data_i.edge_attr.size(1)))
+            data['x_j', 'inner_edge_j', 'x_j'].edge_attr = torch.ones(size=(outer_edge_index_j.max()+1,
+                                                                             data_j.edge_attr.size(1)))
+
+            # data.y = torch.tensor([int(label.strip('C'))], dtype=torch.long)
             data.binary_y = torch.tensor([int(1)], dtype=torch.long)
             data_list.append(data)
 
         # Negative Sample
         for i in tqdm(range(len(data_tuples))):
-            mol_i, mol_j = random.choice(pyg_molecules), random.choice(pyg_molecules)
-            outer_edge_index_i, outer_edge_index_j = self.generate_outer(mol_i.x.size(0), mol_j.x.size(0))
+            data_i, data_j = random.choice(pyg_molecules), random.choice(pyg_molecules)
+            outer_edge_index_i, outer_edge_index_j = self.generate_outer(data_i.x.size(0), data_j.x.size(0))
 
             data = tg.data.HeteroData()
-            data['x_i'].x = data_i.x
-            data['x_j'].x = data_j.x
-            data['x_i', 'inner_edge_i', 'x_i'].edge_index = data_i.edge_index
-            data['x_i', 'inner_edge_i', 'x_i'].edge_attr = data_i.edge_attr
-            data['x_j', 'inner_edge_j', 'x_j'].edge_index = data_j.edge_index
-            data['x_j', 'inner_edge_j', 'x_j'].edge_attr = data_j.edge_attr
-            data['x_i', 'outer_edge_ij', 'x_j'].edge_index = outer_edge_index_i
-            data['x_j', 'outer_edge_ji', 'x_i'].edge_index = outer_edge_index_j
+            data['x_i'].x = data_i.x.float()
+            data['x_j'].x = data_j.x.float()
+            data['x_i', 'inner_edge_i', 'x_i'].edge_index = data_i.edge_index.long()
+            data['x_i', 'inner_edge_i', 'x_i'].edge_attr = data_i.edge_attr.float()
+            data['x_j', 'inner_edge_j', 'x_j'].edge_index = data_j.edge_index.long()
+            data['x_j', 'inner_edge_j', 'x_j'].edge_attr = data_j.edge_attr.float()
 
-            data.y = torch.tensor([int(label.strip('C'))], dtype=torch.long)
-            data.binary_y = torch.tensor([int(1)], dtype=torch.long)
+            data['x_i', 'outer_edge_ij', 'x_j'].edge_index = outer_edge_index_i.long()
+            data['x_j', 'outer_edge_ji', 'x_i'].edge_index = outer_edge_index_j.long()
+
+            data['x_i', 'outer_edge_ij', 'x_j'].edge_attr = torch.ones(size=(outer_edge_index_i.max()+1,
+                                                                             data_i.edge_attr.size(1)))
+            data['x_j', 'inner_edge_j', 'x_j'].edge_attr = torch.ones(size=(outer_edge_index_j.max()+1,
+                                                                            data_j.edge_attr.size(1)))
+
+            # data.y = torch.tensor([int(label.strip('C'))], dtype=torch.long)
+            data.binary_y = torch.tensor([int(0)], dtype=torch.long)
             data_list.append(data)
 
         data, slices = self.collate(data_list)

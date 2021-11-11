@@ -11,9 +11,10 @@ from GraphCoAttention.data.MultipartiteData import BipartitePairData
 
 
 class HeteroGNN(torch.nn.Module):
-    def __init__(self, hidden_channels, out_channels, num_layers):
+    def __init__(self, hidden_channels, out_channels, num_layers, batch_size, num_node_types):
         super().__init__()
 
+        self.batch_size = batch_size
         self.hidden_channels = hidden_channels
         self.convs = torch.nn.ModuleList()
         for _ in range(num_layers):
@@ -27,17 +28,24 @@ class HeteroGNN(torch.nn.Module):
             }, aggr='sum')
             self.convs.append(conv)
 
-        self.lin = Linear(hidden_channels, out_channels)
+        self.lin = Linear(self.hidden_channels, out_channels)
+        # self.hlin = tg.nn.HeteroLinear(hidden_channels, out_channels, num_node_types=num_node_types)
 
-    def forward(self, x_dict, edge_index_dict):
+    def forward(self, x_dict, edge_index_dict, d):
+
+        # x_dict, edge_index_dict = x_dict, edge_index_dict
+
         for conv in self.convs:
             x_dict = conv(x_dict, edge_index_dict)
-            x_dict = {key: x.relu() for key, x in x_dict.items()}
+            x_dict = {key: x.tanh() for key, x in x_dict.items()}
 
-            print(x_dict)
-            exit()
+        p_i = global_mean_pool(x_dict['x_i'], batch=d['x_i'].batch, size=self.batch_size).unsqueeze(1)
+        p_j = global_mean_pool(x_dict['x_j'], batch=d['x_j'].batch, size=self.batch_size).unsqueeze(1)
+        x = torch.cat([p_i, p_j], dim=1)
+        x = torch.mean(x, dim=1)
 
-        return self.lin(x_dict['author'])
+        logits = self.lin(x).sigmoid()
+        return logits
 
 
 class CoAttention(torch.nn.Module):

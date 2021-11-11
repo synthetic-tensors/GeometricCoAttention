@@ -11,22 +11,22 @@ import torchmetrics
 from pytorch_lightning.loggers.wandb import WandbLogger
 
 from GraphCoAttention.datasets.HeterogenousDDI import HeteroDrugDrugInteractionData
-from GraphCoAttention.nn.models.CoAttention import CoAttention
+# from GraphCoAttention.nn.models.CoAttention import CoAttention
 from GraphCoAttention.nn.models.HeterogenousCoAttention import HeteroGNN
-from GraphCoAttention.nn.conv.GATConv import GATConv
+# from GraphCoAttention.nn.conv.GATConv import GATConv
 
 
 class Learner(pl.LightningModule):
-    def __init__(self, root_dir, hidden_dim=5, n_cycles=16, n_head=1, dropout=0.1, lr=0.001, bs=1):
+    def __init__(self, root_dir, hidden_dim=25, n_cycles=16, n_head=1, dropout=0.1, lr=0.001, bs=2):
         super().__init__()
         self.root_dir = root_dir
 
         self.dataset = HeteroDrugDrugInteractionData(root=self.root_dir)
         self.dataset = self.dataset.shuffle()
 
-        print(self.dataset[0])
-        # exit()
+        self.dataset = self.dataset[:10]
 
+        self.num_node_types = len(self.dataset[0].x_dict)
         self.num_workers = 1
         self.n_cycles = n_cycles
         self.n_head = n_head
@@ -57,7 +57,8 @@ class Learner(pl.LightningModule):
         # # self.readout = GATConv(self.hidden_dim*self.n_head, self.hidden_dim, heads=1,
         # #                        add_self_loops=True, bipartite=False, dropout=self.dropout)
 
-        self.HeterogenousCoAttention = HeteroGNN(hidden_channels=self.hidden_dim, out_channels=1, num_layers=5)
+        self.HeterogenousCoAttention = HeteroGNN(hidden_channels=self.hidden_dim, out_channels=1, num_layers=self.n_cycles,
+                                                 batch_size=self.batch_size, num_node_types=self.num_node_types)
 
         # self.CoAttention = CoAttention(hidden_channels=self.hidden_dim, encoder=self.encoder,
         #                                outer=self.outer, inner=self.inner,
@@ -66,20 +67,20 @@ class Learner(pl.LightningModule):
 
         self.bce_loss = torch.nn.BCEWithLogitsLoss()
 
-    def forward(self, data, *args, **kwargs):
+    def forward(self, batch, *args, **kwargs):
 
-        print(data)
-        exit()
+        logits = self.HeterogenousCoAttention(batch.x_dict, batch.edge_index_dict, batch)
 
-        logits = self.HeterogenousCoAttention()
+        # print(logits)
+        # exit()
         # logits = self.CoAttention(data)
         # logits = torch.sigmoid(torch.mean(logits))
         return logits
 
     def training_step(self, data, batch_idx):
         logits = self(data)
-        y_pred = logits
-        y_true = data.binary_y.float().unsqueeze(1)
+        y_pred = logits.squeeze()
+        y_true = data.binary_y.float()
 
         bce = self.bce_loss(input=y_pred, target=y_true)
         # self.log('train_loss', bce)
@@ -89,14 +90,12 @@ class Learner(pl.LightningModule):
         return {'loss': bce}  # , 'train_accuracy': acc, 'train_f1': f1}
 
     def validation_step(self, val_batch, batch_idx):
+
+        # print(val_batch.binary_y.float())
+
         logits = self(val_batch)
-
-        y_pred = logits
-        y_true = val_batch.binary_y.float().unsqueeze(1)
-
-        # print(y_pred)
-        # print(y_true)
-        # exit()
+        y_pred = logits.squeeze()
+        y_true = val_batch.binary_y.float()
 
         bce_loss = self.bce_loss(input=y_pred, target=y_true)
         # self.log('validation_loss', bce_loss)
@@ -111,11 +110,11 @@ class Learner(pl.LightningModule):
         return [optimizer], [scheduler]
 
     def train_dataloader(self):
-        return tg.loader.DataLoader(self.dataset, batch_size=self.batch_size,
+        return tg.loader.DataLoader(list(self.dataset), batch_size=self.batch_size,
                                     num_workers=self.num_workers, pin_memory=False, shuffle=True)
 
     def val_dataloader(self):
-        return tg.loader.DataLoader(self.dataset, batch_size=self.batch_size,
+        return tg.loader.DataLoader(list(self.dataset), batch_size=self.batch_size,
                                     num_workers=self.num_workers, pin_memory=False, shuffle=True)
 
 
@@ -123,5 +122,5 @@ if __name__ == '__main__':
     os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
     data_dir = os.path.join('GraphCoAttention', 'data')
     wandb_logger = WandbLogger(project='flux', log_model='all')
-    trainer = pl.Trainer(gpus=[0], max_epochs=2000, check_val_every_n_epoch=500, accumulate_grad_batches=50)
-    trainer.fit(Learner(data_dir, bs=1))
+    trainer = pl.Trainer(gpus=[0], max_epochs=2000, check_val_every_n_epoch=500, accumulate_grad_batches=1)
+    trainer.fit(Learner(data_dir, bs=10, lr=0.0005, n_cycles=40, hidden_dim=4))
