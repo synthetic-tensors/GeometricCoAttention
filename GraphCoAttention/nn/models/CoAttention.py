@@ -61,7 +61,7 @@ class CoAttention(torch.nn.Module):
             m_i = self.inner_i[index](x=x_i, edge_index=data.inner_edge_index_i)
             m_j = self.inner_j[index](x=x_j, edge_index=data.inner_edge_index_j)
 
-            m_i = F.leaky_relu(m_i)
+            m_i = F.tanh(m_i)
             m_j = F.leaky_relu(m_j)
 
             a_ij = self.outer_i[index](x=(x_j, x_i), edge_index=data.outer_edge_index_j)
@@ -86,7 +86,7 @@ class CoAttention(torch.nn.Module):
         x = torch.cat((p_i, p_j), dim=1)
         x = x.view(self.batch_size, self.n_head, -1)
 
-        logits = self.readout(x)
+        logits = self.readout(x).tanh()
         logits = torch.sigmoid(torch.mean(logits, dim=1))
         # logits = torch.mean(logits, dim=1)
 

@@ -4,27 +4,30 @@ from torch.nn import Parameter
 from torch.nn import functional as F
 import torch_geometric as tg
 
-from torch_geometric.nn import GATConv, HeteroConv, Linear
-from torch_geometric.nn.glob import global_mean_pool
+from torch_geometric.nn import GATConv, HeteroConv, Linear, GATv2Conv
+from torch_geometric.nn.glob import global_mean_pool, global_add_pool
+from torch.nn import LeakyReLU
 
 from GraphCoAttention.data.MultipartiteData import BipartitePairData
 
 
 class HeteroGNN(torch.nn.Module):
-    def __init__(self, hidden_channels, out_channels, num_layers, batch_size, num_node_types):
+    def __init__(self, hidden_channels, out_channels, num_layers, batch_size, num_node_types, num_heads):
         super().__init__()
 
         self.batch_size = batch_size
         self.hidden_channels = hidden_channels
+        self.heads = num_heads
+
         self.convs = torch.nn.ModuleList()
         for _ in range(num_layers):
             conv = HeteroConv({
-                ('x_i', 'inner_edge_i', 'x_i'): GATConv((-1, -1), self.hidden_channels),
-                ('x_j', 'inner_edge_j', 'x_j'): GATConv((-1, -1), self.hidden_channels),
-                ('x_i', 'outer_edge_ij', 'x_j'): GATConv((-1, -1), self.hidden_channels),
-                ('x_j', 'outer_edge_ji', 'x_i'): GATConv((-1, -1), self.hidden_channels),
-                ('x_i', 'inner_edge_i', 'x_i'): GATConv((-1, -1), self.hidden_channels),
-                ('x_j', 'inner_edge_j', 'x_j'): GATConv((-1, -1), self.hidden_channels),
+                ('x_i', 'inner_edge_i', 'x_i'): GATv2Conv(-1, self.hidden_channels, heads=num_heads),
+                ('x_j', 'inner_edge_j', 'x_j'): GATv2Conv(-1, self.hidden_channels, heads=num_heads),
+                ('x_i', 'outer_edge_ij', 'x_j'): GATv2Conv(-1, self.hidden_channels, heads=num_heads),
+                ('x_j', 'outer_edge_ji', 'x_i'): GATv2Conv(-1, self.hidden_channels, heads=num_heads),
+                ('x_i', 'inner_edge_i', 'x_i'): GATv2Conv(-1, self.hidden_channels, heads=num_heads),
+                ('x_j', 'inner_edge_j', 'x_j'): GATv2Conv(-1, self.hidden_channels, heads=num_heads),
             }, aggr='sum')
             self.convs.append(conv)
 
@@ -37,12 +40,24 @@ class HeteroGNN(torch.nn.Module):
 
         for conv in self.convs:
             x_dict = conv(x_dict, edge_index_dict)
-            x_dict = {key: x.tanh() for key, x in x_dict.items()}
+            x_dict = {key: torch.tanh(torch.sum(x.view(-1, self.heads, self.hidden_channels), dim=1))
+                      for key, x in x_dict.items()}
 
-        p_i = global_mean_pool(x_dict['x_i'], batch=d['x_i'].batch, size=self.batch_size).unsqueeze(1)
-        p_j = global_mean_pool(x_dict['x_j'], batch=d['x_j'].batch, size=self.batch_size).unsqueeze(1)
+            # [print(key, x.shape) for key, x in x_dict.items()]
+            # [print(key, x.view(-1, self.heads, self.hidden_channels).shape) for key, x in x_dict.items()]
+            # [print(key, torch.mean(x.view(-1, self.heads, self.hidden_channels), dim=1).shape) for key, x in x_dict.items()]
+
+        # p_i = F.leaky_relu(global_add_pool(x_dict['x_i'], batch=d['x_i'].batch, size=self.batch_size).unsqueeze(1))
+        # p_j = F.leaky_relu(global_add_pool(x_dict['x_j'], batch=d['x_j'].batch, size=self.batch_size).unsqueeze(1))
+
+        # p_i = global_add_pool(x_dict['x_i'], batch=d['x_i'].batch, size=self.batch_size).unsqueeze(1).sigmoid()
+        # p_j = global_add_pool(x_dict['x_j'], batch=d['x_j'].batch, size=self.batch_size).unsqueeze(1).sigmoid()
+
+        p_i = global_add_pool(x_dict['x_i'], batch=d['x_i'].batch, size=self.batch_size).unsqueeze(1).tanh()
+        p_j = global_add_pool(x_dict['x_j'], batch=d['x_j'].batch, size=self.batch_size).unsqueeze(1).tanh()
+
         x = torch.cat([p_i, p_j], dim=1)
-        x = torch.mean(x, dim=1)
+        x = torch.sum(x, dim=1)
 
         logits = self.lin(x).sigmoid()
         return logits

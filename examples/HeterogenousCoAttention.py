@@ -27,7 +27,7 @@ class Learner(pl.LightningModule):
         self.dataset = self.dataset[:10]
 
         self.num_node_types = len(self.dataset[0].x_dict)
-        self.num_workers = 1
+        self.num_workers = 32
         self.n_cycles = n_cycles
         self.n_head = n_head
         self.dropout = dropout
@@ -58,7 +58,8 @@ class Learner(pl.LightningModule):
         # #                        add_self_loops=True, bipartite=False, dropout=self.dropout)
 
         self.HeterogenousCoAttention = HeteroGNN(hidden_channels=self.hidden_dim, out_channels=1, num_layers=self.n_cycles,
-                                                 batch_size=self.batch_size, num_node_types=self.num_node_types)
+                                                 batch_size=self.batch_size, num_node_types=self.num_node_types,
+                                                 num_heads=self.n_head)
 
         # self.CoAttention = CoAttention(hidden_channels=self.hidden_dim, encoder=self.encoder,
         #                                outer=self.outer, inner=self.inner,
@@ -105,7 +106,7 @@ class Learner(pl.LightningModule):
         return {'loss': bce_loss}
 
     def configure_optimizers(self):
-        optimizer = optim.Adam(self.parameters(), lr=self.lr, weight_decay=1e-4)
+        optimizer = optim.AdamW(self.parameters(), lr=self.lr, betas=(0.28, 0.93), weight_decay=0.01)
         scheduler = optim.lr_scheduler.MultiStepLR(optimizer, '25,35', gamma=0.1)
         return [optimizer], [scheduler]
 
@@ -123,4 +124,4 @@ if __name__ == '__main__':
     data_dir = os.path.join('GraphCoAttention', 'data')
     wandb_logger = WandbLogger(project='flux', log_model='all')
     trainer = pl.Trainer(gpus=[0], max_epochs=2000, check_val_every_n_epoch=500, accumulate_grad_batches=1)
-    trainer.fit(Learner(data_dir, bs=10, lr=0.0005, n_cycles=40, hidden_dim=4))
+    trainer.fit(Learner(data_dir, bs=2, lr=0.0005, n_cycles=30, hidden_dim=10, n_head=4))
