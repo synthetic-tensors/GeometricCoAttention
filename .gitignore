@@ -1,0 +1,14 @@
+###
+# osx files
+###
+.DS_Store
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+
+# Random experiments within the same conda environment
+/tmp
+
+# Jupyter notebook manual save checkpoints
+.ipynb_checkpoints

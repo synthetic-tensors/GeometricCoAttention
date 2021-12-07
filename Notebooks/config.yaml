@@ -1,0 +1,19 @@
+program: CoAttention.py
+method: grid
+metric:
+  name: train/loss
+  goal: minimize
+parameters:
+  learning_rate:
+    values: [0.00001, 0.00005, 0.0001, 0.0005, 0.001, 0.005, 0.01]
+  batch_size:
+    values: [2,4,5,10,15,20,40,80]
+  n_head:
+    values: [1,2,4,8,16,32]
+  hidden_dim:
+    values: [1, 4, 8, 16, 25, 32, 64, 128]
+  n_cycles:
+    values: [2, 4, 8, 16, 32, 40]
+  dropout:
+    values: [0.1,0.2]
+    
