@@ -13,6 +13,8 @@ from retrying import retry
 from ogb.utils.url import decide_download, download_url, extract_zip
 import ogb.utils.mol as mol
 import torch_geometric as tg
+import torch_geometric.transforms as T
+from torch_geometric.datasets import QM9
 from torch_geometric.data.collate import collate
 
 from GraphCoAttention.data.MultipartiteData import BipartitePairData
@@ -157,13 +159,81 @@ class HeteroDrugDrugInteractionData(tg.data.InMemoryDataset, ABC):
         torch.save((data, slices), self.processed_paths[0])
 
 
+target = 0
+
+
+class MyTransform(object):
+    def __call__(self, data):
+        # Specify target.
+        data.y = data.y[:, target]
+        return data
+
+
+class Complete(object):
+    def __call__(self, data):
+        device = data.edge_index.device
+
+        row = torch.arange(data.num_nodes, dtype=torch.long, device=device)
+        col = torch.arange(data.num_nodes, dtype=torch.long, device=device)
+
+        row = row.view(-1, 1).repeat(1, data.num_nodes).view(-1)
+        col = col.repeat(data.num_nodes)
+        edge_index = torch.stack([row, col], dim=0)
+
+        edge_attr = None
+        if data.edge_attr is not None:
+            idx = data.edge_index[0] * data.num_nodes + data.edge_index[1]
+            size = list(data.edge_attr.size())
+            size[0] = data.num_nodes * data.num_nodes
+            edge_attr = data.edge_attr.new_zeros(size)
+            edge_attr[idx] = data.edge_attr
+
+        edge_index, edge_attr = tg.utils.remove_self_loops(edge_index, edge_attr)
+        data.edge_attr = edge_attr
+        data.edge_index = edge_index
+
+        return data
+
+
+class HeteroQM9(tg.data.InMemoryDataset, ABC):
+    def __init__(self, root):
+        super().__init__(root)
+        # self.qm9_dataset_transformed = QM9(root, transform=tg.transforms.Compose([MyTransform(), Complete(),
+        #                                          tg.transforms.Distance(norm=False)]))
+
+        self.qm9_dataset = QM9(root=root)
+
+        print(self.mol2pyg('OC[C@H]1OC(O)[C@H](O)[C@@H](O)[C@@H]1O'))
+
+        print(self.qm9_dataset[0])
+        print(self.qm9_dataset[0].y)
+        print(self.qm9_dataset[0].z)
+        print(self.qm9_dataset[0].pos)
+
+        # [print(x.y) for x in self.qm9_dataset]
+
+    @staticmethod
+    def mol2pyg(molecule):
+        graph = mol.smiles2graph(molecule)
+        data = tg.data.Data()
+        data.__num_nodes__ = int(graph['num_nodes'])
+        data.edge_index = torch.from_numpy(graph['edge_index']).to(torch.int64)
+        data.edge_attr = torch.from_numpy(graph['edge_feat']).float()
+        data.x = torch.from_numpy(graph['node_feat']).float()
+        return data
+
+
+
 if __name__ == '__main__':
     import wandb
 
-    dataset = HeteroDrugDrugInteractionData(root=os.path.join('GraphCoAttention', 'data'))
-    run = wandb.init(project="flux", entity="syntensor", job_type="dataset-creation")
-    artifact = wandb.Artifact('drug-drug-interaction', type='dataset')
-    artifact.add_reference('s3://syntensor-data/processed')
-    artifact.add_file(os.path.join(os.path.join('GraphCoAttention', 'data', 'processed'),
-                                   'heterogenous_decagon_ps_ns_.pt'))
-    run.log_artifact(artifact)
+    # dataset = HeteroDrugDrugInteractionData(root=os.path.join('GraphCoAttention', 'data'))
+    dataset = HeteroQM9(root=os.path.join('GraphCoAttention', 'data'))
+
+
+    # run = wandb.init(project="flux", entity="syntensor", job_type="dataset-creation")
+    # artifact = wandb.Artifact('drug-drug-interaction', type='dataset')
+    # artifact.add_reference('s3://syntensor-data/processed')
+    # artifact.add_file(os.path.join(os.path.join('GraphCoAttention', 'data', 'processed'),
+    #                                'heterogenous_decagon_ps_ns_.pt'))
+    # run.log_artifact(artifact)

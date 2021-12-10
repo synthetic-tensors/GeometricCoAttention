@@ -83,6 +83,7 @@ class Learner(pl.LightningModule):
         y_pred = logits.squeeze()
         y_true = data.binary_y.float()
 
+
         bce = self.bce_loss(input=y_pred, target=y_true)
         # self.log('train_loss', bce)
         wandb.log({"train/loss": bce})
@@ -117,7 +118,6 @@ class Learner(pl.LightningModule):
     def val_dataloader(self):
         return tg.loader.DataLoader(list(self.dataset), batch_size=self.batch_size,
                                     num_workers=self.num_workers, pin_memory=False, shuffle=True)
-
 
 if __name__ == '__main__':
     os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
