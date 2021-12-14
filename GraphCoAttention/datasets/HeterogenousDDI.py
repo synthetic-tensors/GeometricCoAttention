@@ -263,7 +263,7 @@ class HeteroQM9(tg.data.InMemoryDataset, ABC):
 
     @property
     def processed_file_names(self):
-        return 'heterogenous_qm9.pt'
+        return 'heterogenous_qm9_norm.pt'
 
     def download(self):
         if decide_download(self.url):
@@ -378,6 +378,10 @@ class HeteroQM9(tg.data.InMemoryDataset, ABC):
                 continue
         tar.close()
 
+        ys = torch.stack([data.y for data in datalist])
+        y_mean = ys.mean(dim=0)
+        y_std = ys.std(dim=0)
+
         heterodata_list = []
         for i in tqdm(range(len(datalist))):
             data_i, data_j = random.choice(datalist), random.choice(datalist)
@@ -401,6 +405,10 @@ class HeteroQM9(tg.data.InMemoryDataset, ABC):
 
             data['y_i'].y = data_i.y.float()
             data['y_j'].y = data_j.y.float()
+
+            data['y_i'].y_norm = (data_i.y.float() - y_mean) / y_std
+            data['y_j'].y_norm = (data_j.y.float() - y_mean) / y_std
+
             data.binary_y = torch.tensor([int(0)], dtype=torch.long)
             heterodata_list.append(data)
 
