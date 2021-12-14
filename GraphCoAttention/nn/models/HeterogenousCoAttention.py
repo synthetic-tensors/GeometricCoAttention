@@ -12,7 +12,8 @@ from GraphCoAttention.data.MultipartiteData import BipartitePairData
 
 
 class HeteroGNN(torch.nn.Module):
-    def __init__(self, hidden_channels, out_channels, num_layers, batch_size, num_node_types, num_heads):
+    def __init__(self, hidden_channels, outer_out_channels, inner_out_channels,
+                 num_layers, batch_size, num_node_types, num_heads):
         super().__init__()
 
         self.batch_size = batch_size
@@ -31,7 +32,10 @@ class HeteroGNN(torch.nn.Module):
             }, aggr='sum')
             self.convs.append(conv)
 
-        self.lin = Linear(self.hidden_channels, out_channels)
+        self.lin = Linear(self.hidden_channels, outer_out_channels)
+
+        self.lin_i = Linear(self.hidden_channels, inner_out_channels)
+        self.lin_j = Linear(self.hidden_channels, inner_out_channels)
         # self.hlin = tg.nn.HeteroLinear(hidden_channels, out_channels, num_node_types=num_node_types)
 
     def forward(self, x_dict, edge_index_dict, d):
@@ -56,11 +60,14 @@ class HeteroGNN(torch.nn.Module):
         p_i = global_add_pool(x_dict['x_i'], batch=d['x_i'].batch, size=self.batch_size).unsqueeze(1).tanh()
         p_j = global_add_pool(x_dict['x_j'], batch=d['x_j'].batch, size=self.batch_size).unsqueeze(1).tanh()
 
+        y_i_ = self.lin_i(p_i)
+        y_j_ = self.lin_j(p_j)
+
         x = torch.cat([p_i, p_j], dim=1)
         x = torch.sum(x, dim=1)
 
         logits = self.lin(x).sigmoid()
-        return logits
+        return logits, y_i_, y_j_
 
 
 class CoAttention(torch.nn.Module):

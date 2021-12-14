@@ -272,6 +272,14 @@ class HeteroQM9(tg.data.InMemoryDataset, ABC):
             print('Stop download.')
             exit(-1)
 
+    @staticmethod
+    def generate_outer(x_i_size, x_j_size):
+        top = torch.tensor(list(set(range(x_i_size))), dtype=torch.long)
+        bottom = torch.tensor(list(set(range(x_j_size))), dtype=torch.long)
+        outer_edge_index_i = torch.cartesian_prod(top, bottom).T
+        outer_edge_index_j = torch.cartesian_prod(bottom, top).T
+        return outer_edge_index_i, outer_edge_index_j
+
     def mol2pyg(self, molecule):
         graph = self.smiles2graph(molecule)
         data = tg.data.Data()
@@ -347,37 +355,58 @@ class HeteroQM9(tg.data.InMemoryDataset, ABC):
         print(ogq[0].y)
 
         smiles_prop_dict = {}
+        datalist = []
         tar = tarfile.open(self.raw_paths[0], "r:bz2")
-        for tarinfo in tar:
+        for tarinfo in tqdm(tar):
             if tarinfo.isreg():
                 f = tar.extractfile(tarinfo)
                 lines = f.read().decode().split('\n')
-                # print(lines)
-
                 targets = [float(i) for i in lines[1].split('\t')[1:-1]]
-                hof = [float(i) for i in lines[-4].split('\t')]  # Harmonic oscillator frequencies
+                # hof = [float(i) for i in lines[-4].split('\t')]  # Harmonic oscillator frequencies
                 smiles = lines[-3].split('\t')[1]
-                print(smiles)
-                t_names = ['A', 'B', 'C', 'mu', 'alpha', 'homo', 'lumo', 'gap', 'r2', 'zpve', 'U0', 'U', 'H', 'G', 'Cv']
+                # t_n = ['A', 'B', 'C', 'mu', 'alpha', 'homo', 'lumo', 'gap', 'r2', 'zpve', 'U0', 'U', 'H', 'G', 'Cv']
+                # target_dict = dict(zip(t_names, targets))
 
-                target_dict = dict(zip(t_names, targets))
-
-                mol_graph = self.mol2pyg(smiles)
-                print(mol_graph)
-
-                exit()
-                # print(f.read().decode().split('\n')[-3:-4])
-                # smiles =
-                # y = f.read().decode().split('\n')[-4].split('\t')
-                # print(smiles, y)
-                # smiles_prop_dict[smiles] = y
-                # print(smiles_prop_dict[smiles])
+                try:
+                    mol_graph = self.mol2pyg(smiles)
+                    data = mol_graph
+                    data.y = torch.tensor(targets).float()
+                    datalist.append(data)
+                except:  # Boost.Python.ArgumentError
+                    continue
             else:
                 continue
         tar.close()
 
-        # print(smiles_prop_dict)
-        exit()
+        heterodata_list = []
+        for i in tqdm(range(len(datalist))):
+            data_i, data_j = random.choice(datalist), random.choice(datalist)
+            outer_edge_index_i, outer_edge_index_j = self.generate_outer(data_i.x.size(0), data_j.x.size(0))
+
+            data = tg.data.HeteroData()
+            data['x_i'].x = data_i.x.float()
+            data['x_j'].x = data_j.x.float()
+            data['x_i', 'inner_edge_i', 'x_i'].edge_index = data_i.edge_index.long()
+            data['x_i', 'inner_edge_i', 'x_i'].edge_attr = data_i.edge_attr.float()
+            data['x_j', 'inner_edge_j', 'x_j'].edge_index = data_j.edge_index.long()
+            data['x_j', 'inner_edge_j', 'x_j'].edge_attr = data_j.edge_attr.float()
+
+            data['x_i', 'outer_edge_ij', 'x_j'].edge_index = outer_edge_index_i.long()
+            data['x_j', 'outer_edge_ji', 'x_i'].edge_index = outer_edge_index_j.long()
+
+            data['x_i', 'outer_edge_ij', 'x_j'].edge_attr = torch.ones(size=(outer_edge_index_i.max() + 1,
+                                                                             data_i.edge_attr.size(1)))
+            data['x_j', 'inner_edge_j', 'x_j'].edge_attr = torch.ones(size=(outer_edge_index_j.max() + 1,
+                                                                            data_j.edge_attr.size(1)))
+
+            data['y_i'].y = data_i.y.float()
+            data['y_j'].y = data_j.y.float()
+            data.binary_y = torch.tensor([int(0)], dtype=torch.long)
+            heterodata_list.append(data)
+
+        data, slices = self.collate(heterodata_list)
+        print('Saving...')
+        torch.save((data, slices), self.processed_paths[0])
 
 
 if __name__ == '__main__':
