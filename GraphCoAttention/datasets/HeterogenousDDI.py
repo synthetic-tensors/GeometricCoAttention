@@ -4,14 +4,18 @@ import wget
 import wandb
 import itertools
 import random
+import tarfile
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
+from rdkit import Chem
 from abc import ABC, ABCMeta
 from retrying import retry
 
 from ogb.utils.url import decide_download, download_url, extract_zip
-import ogb.utils.mol as mol
+# import ogb.utils.mol as mol
+from ogb.utils.features import (allowable_features, atom_to_feature_vector,
+ bond_to_feature_vector, atom_feature_vector_to_dict, bond_feature_vector_to_dict)
 import torch_geometric as tg
 import torch_geometric.transforms as T
 from torch_geometric.datasets import QM9
@@ -57,6 +61,57 @@ class HeteroDrugDrugInteractionData(tg.data.InMemoryDataset, ABC):
         data.edge_attr = torch.from_numpy(graph['edge_feat']).float()
         data.x = torch.from_numpy(graph['node_feat']).float()
         return data
+
+    @staticmethod
+    def smiles2graph(smiles_string):
+        """
+        Converts SMILES string to graph Data object
+        :input: SMILES string (str)
+        :return: graph object
+        """
+
+        mol = Chem.MolFromSmiles(smiles_string)
+
+        # atoms
+        atom_features_list = []
+        for atom in mol.GetAtoms():
+            atom_features_list.append(atom_to_feature_vector(atom))
+        x = np.array(atom_features_list, dtype=np.int64)
+
+        # bonds
+        num_bond_features = 3  # bond type, bond stereo, is_conjugated
+        if len(mol.GetBonds()) > 0:  # mol has bonds
+            edges_list = []
+            edge_features_list = []
+            for bond in mol.GetBonds():
+                i = bond.GetBeginAtomIdx()
+                j = bond.GetEndAtomIdx()
+
+                edge_feature = bond_to_feature_vector(bond)
+
+                # add edges in both directions
+                edges_list.append((i, j))
+                edge_features_list.append(edge_feature)
+                edges_list.append((j, i))
+                edge_features_list.append(edge_feature)
+
+            # data.edge_index: Graph connectivity in COO format with shape [2, num_edges]
+            edge_index = np.array(edges_list, dtype=np.int64).T
+
+            # data.edge_attr: Edge feature matrix with shape [num_edges, num_edge_features]
+            edge_attr = np.array(edge_features_list, dtype=np.int64)
+
+        else:  # mol has no bonds
+            edge_index = np.empty((2, 0), dtype=np.int64)
+            edge_attr = np.empty((0, num_bond_features), dtype=np.int64)
+
+        graph = dict()
+        graph['edge_index'] = edge_index
+        graph['edge_feat'] = edge_attr
+        graph['node_feat'] = x
+        graph['num_nodes'] = len(x)
+
+        return graph
 
     @staticmethod
     def generate_outer(x_i_size, x_j_size):
@@ -197,24 +252,28 @@ class Complete(object):
 
 class HeteroQM9(tg.data.InMemoryDataset, ABC):
     def __init__(self, root):
+        self.url = 'https://figshare.com/ndownloader/files/3195389'
         super().__init__(root)
-        # self.qm9_dataset_transformed = QM9(root, transform=tg.transforms.Compose([MyTransform(), Complete(),
-        #                                          tg.transforms.Distance(norm=False)]))
 
-        self.qm9_dataset = QM9(root=root)
+        self.data, self.slices = torch.load(self.processed_paths[0])
 
-        print(self.mol2pyg('OC[C@H]1OC(O)[C@H](O)[C@@H](O)[C@@H]1O'))
+    @property
+    def raw_file_names(self):
+        return 'dsgdb9nsd.xyz.tar.bz2'
 
-        print(self.qm9_dataset[0])
-        print(self.qm9_dataset[0].y)
-        print(self.qm9_dataset[0].z)
-        print(self.qm9_dataset[0].pos)
+    @property
+    def processed_file_names(self):
+        return 'heterogenous_qm9.pt'
 
-        # [print(x.y) for x in self.qm9_dataset]
+    def download(self):
+        if decide_download(self.url):
+            wget.download(self.url, self.raw_paths[0])
+        else:
+            print('Stop download.')
+            exit(-1)
 
-    @staticmethod
-    def mol2pyg(molecule):
-        graph = mol.smiles2graph(molecule)
+    def mol2pyg(self, molecule):
+        graph = self.smiles2graph(molecule)
         data = tg.data.Data()
         data.__num_nodes__ = int(graph['num_nodes'])
         data.edge_index = torch.from_numpy(graph['edge_index']).to(torch.int64)
@@ -222,6 +281,103 @@ class HeteroQM9(tg.data.InMemoryDataset, ABC):
         data.x = torch.from_numpy(graph['node_feat']).float()
         return data
 
+    @staticmethod
+    def smiles2graph(smiles_string):
+        """
+        Converts SMILES string to graph Data object
+        :input: SMILES string (str)
+        :return: graph object
+        """
+
+        mol = Chem.MolFromSmiles(smiles_string)
+        mol = Chem.AddHs(mol)
+
+        # atoms
+        atom_features_list = []
+        for atom in mol.GetAtoms():
+            atom_features_list.append(atom_to_feature_vector(atom))
+        x = np.array(atom_features_list, dtype=np.int64)
+
+        # bonds
+        num_bond_features = 3  # bond type, bond stereo, is_conjugated
+        if len(mol.GetBonds()) > 0:  # mol has bonds
+            edges_list = []
+            edge_features_list = []
+            for bond in mol.GetBonds():
+                i = bond.GetBeginAtomIdx()
+                j = bond.GetEndAtomIdx()
+
+                edge_feature = bond_to_feature_vector(bond)
+
+                # add edges in both directions
+                edges_list.append((i, j))
+                edge_features_list.append(edge_feature)
+                edges_list.append((j, i))
+                edge_features_list.append(edge_feature)
+
+            # data.edge_index: Graph connectivity in COO format with shape [2, num_edges]
+            edge_index = np.array(edges_list, dtype=np.int64).T
+
+            # data.edge_attr: Edge feature matrix with shape [num_edges, num_edge_features]
+            edge_attr = np.array(edge_features_list, dtype=np.int64)
+
+        else:  # mol has no bonds
+            edge_index = np.empty((2, 0), dtype=np.int64)
+            edge_attr = np.empty((0, num_bond_features), dtype=np.int64)
+
+        graph = dict()
+        graph['edge_index'] = edge_index
+        graph['edge_feat'] = edge_attr
+        graph['node_feat'] = x
+        graph['num_nodes'] = len(x)
+
+        return graph
+
+    @staticmethod
+    def parse_float(s: str) -> float:
+        try:
+            return float(s)
+        except ValueError:
+            base, power = s.split('*^')
+            return float(base) * 10 ** float(power)
+
+    def process(self):
+
+        ogq = QM9(root=self.root)
+        print(ogq[0].y)
+
+        smiles_prop_dict = {}
+        tar = tarfile.open(self.raw_paths[0], "r:bz2")
+        for tarinfo in tar:
+            if tarinfo.isreg():
+                f = tar.extractfile(tarinfo)
+                lines = f.read().decode().split('\n')
+                # print(lines)
+
+                targets = [float(i) for i in lines[1].split('\t')[1:-1]]
+                hof = [float(i) for i in lines[-4].split('\t')]  # Harmonic oscillator frequencies
+                smiles = lines[-3].split('\t')[1]
+                print(smiles)
+                t_names = ['A', 'B', 'C', 'mu', 'alpha', 'homo', 'lumo', 'gap', 'r2', 'zpve', 'U0', 'U', 'H', 'G', 'Cv']
+
+                target_dict = dict(zip(t_names, targets))
+
+                mol_graph = self.mol2pyg(smiles)
+                print(mol_graph)
+
+                exit()
+                # print(f.read().decode().split('\n')[-3:-4])
+                # smiles =
+                # y = f.read().decode().split('\n')[-4].split('\t')
+                # print(smiles, y)
+                # smiles_prop_dict[smiles] = y
+                # print(smiles_prop_dict[smiles])
+            else:
+                continue
+        tar.close()
+
+        # print(smiles_prop_dict)
+        exit()
 
 
 if __name__ == '__main__':
