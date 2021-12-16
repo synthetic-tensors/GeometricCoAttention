@@ -173,5 +173,5 @@ if __name__ == '__main__':
     wandb.init()
     wandb_logger = WandbLogger(project='flux', log_model='all')
     trainer = pl.Trainer(gpus=[1], max_epochs=2000, check_val_every_n_epoch=500, accumulate_grad_batches=1)
-    trainer.fit(Learner(data_dir, bs=15, lr=0.001, n_cycles=40, hidden_dim=225, n_head=5))
+    trainer.fit(Learner(data_dir, bs=5, lr=0.001, n_cycles=40, hidden_dim=225, n_head=5))
 
