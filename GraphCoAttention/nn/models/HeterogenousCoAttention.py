@@ -1,10 +1,10 @@
 import torch
 from torch import nn
-from torch.nn import Parameter
+from torch.nn import Parameter, Sequential, ReLU, GRU
 from torch.nn import functional as F
 import torch_geometric as tg
 
-from torch_geometric.nn import GATConv, HeteroConv, Linear, GATv2Conv
+from torch_geometric.nn import GATConv, HeteroConv, Linear, GATv2Conv, NNConv, Set2Set
 from torch_geometric.nn.glob import global_mean_pool, global_add_pool
 from torch.nn import LeakyReLU
 
@@ -153,3 +153,42 @@ class CoAttention(torch.nn.Module):
         # logits = torch.mean(logits, dim=1)
 
         return logits
+    
+    
+class Net(torch.nn.Module):
+    def __init__(self, dataset, dim):
+        super().__init__()
+
+        self.num_features = len(dataset[0].x_dict)
+
+        self.lin0 = Linear(self.num_features, dim)
+
+        nn = Sequential(Linear(5, 128), ReLU(), Linear(128, dim * dim))
+        self.conv = NNConv(dim, dim, nn, aggr='mean')
+        self.gru = GRU(dim, dim)
+
+        self.set2set = Set2Set(dim, processing_steps=3)
+        
+        self.lin = Linear(dim, 1)
+
+        self.lin_i = Linear(dim, 15)
+        self.lin_j = Linear(dim, 15)
+        
+    def forward(self, data):
+        print(data[0])
+        exit()
+        # out = F.relu(self.lin0(data.x))
+        # h = out.unsqueeze(0)
+
+        for i in range(3):
+            m = F.relu(self.conv(out, data.edge_index, data.edge_attr))
+            out, h = self.gru(m.unsqueeze(0), h)
+            out = out.squeeze(0)
+
+        out = self.set2set(out, data.batch)
+        
+        y_i_ = self.lin_i(out)
+        y_j_ = self.lin_j(out)
+
+        logits = self.lin(out).sigmoid()
+        return logits, y_i_, y_j_
