@@ -156,39 +156,87 @@ class CoAttention(torch.nn.Module):
     
     
 class Net(torch.nn.Module):
-    def __init__(self, dataset, dim):
+    def __init__(self, hidden_channels, outer_out_channels, inner_out_channels,
+                 num_layers, batch_size, num_node_types):
         super().__init__()
 
-        self.num_features = len(dataset[0].x_dict)
+        self.batch_size = batch_size
+        self.dim = hidden_channels
 
-        self.lin0 = Linear(self.num_features, dim)
-
-        nn = Sequential(Linear(5, 128), ReLU(), Linear(128, dim * dim))
-        self.conv = NNConv(dim, dim, nn, aggr='mean')
-        self.gru = GRU(dim, dim)
-
-        self.set2set = Set2Set(dim, processing_steps=3)
+        nn = Sequential(Linear(5, 128), ReLU(), Linear(128, self.dim * self.dim))
         
-        self.lin = Linear(dim, 1)
-
-        self.lin_i = Linear(dim, 15)
-        self.lin_j = Linear(dim, 15)
+        self.convs = torch.nn.ModuleList()
+        for _ in range(num_layers):
+            conv = HeteroConv({
+                ('x_i', 'inner_edge_i', 'x_i'): NNConv(self.dim, self.dim, nn, aggr='mean'),
+                ('x_j', 'inner_edge_j', 'x_j'): NNConv(self.dim, self.dim, nn, aggr='mean'),
+                ('x_i', 'outer_edge_ij', 'x_j'): NNConv(self.dim, self.dim, nn, aggr='mean'),
+                ('x_j', 'outer_edge_ji', 'x_i'): NNConv(self.dim, self.dim, nn, aggr='mean'),
+                ('x_i', 'inner_edge_i', 'x_i'): NNConv(self.dim, self.dim, nn, aggr='mean'),
+                ('x_j', 'inner_edge_j', 'x_j'): NNConv(self.dim, self.dim, nn, aggr='mean'),
+            }, aggr='sum')
+            self.convs.append(conv)
         
-    def forward(self, data):
-        print(data[0])
-        exit()
-        # out = F.relu(self.lin0(data.x))
-        # h = out.unsqueeze(0)
+        self.lin = Linear(self.dim, outer_out_channels)
 
-        for i in range(3):
-            m = F.relu(self.conv(out, data.edge_index, data.edge_attr))
-            out, h = self.gru(m.unsqueeze(0), h)
-            out = out.squeeze(0)
-
-        out = self.set2set(out, data.batch)
+        self.lin_i = Linear(self.dim, inner_out_channels)
+        self.lin_j = Linear(self.dim, inner_out_channels)
         
-        y_i_ = self.lin_i(out)
-        y_j_ = self.lin_j(out)
 
-        logits = self.lin(out).sigmoid()
+    def forward(self, x_dict, edge_index_dict, d):
+
+        x_dict, edge_index_dict = x_dict, edge_index_dict
+
+        for conv in self.convs:
+            x_dict = conv(x_dict, edge_index_dict)
+            print(x_dict)
+            exit()
+            x_dict = {key: torch.tanh(torch.sum(x.view(-1, self.hidden_channels), dim=1))
+                      for key, x in x_dict.items()}
+
+        p_i = global_add_pool(x_dict['x_i'], batch=d['x_i'].batch, size=self.batch_size).unsqueeze(1).tanh()
+        p_j = global_add_pool(x_dict['x_j'], batch=d['x_j'].batch, size=self.batch_size).unsqueeze(1).tanh()
+        
+        y_i_ = self.lin_i(p_i)
+        y_j_ = self.lin_j(p_j)
+
+        x = torch.cat([p_i, p_j], dim=1)
+        x = torch.sum(x, dim=1)
+
+        logits = self.lin(x).sigmoid()
         return logits, y_i_, y_j_
+    
+    
+
+#     def __init__(self, dataset, dim):
+#         super().__init__()
+
+#         self.num_features = len(dataset[0].x_dict)
+
+#         self.lin0 = Linear(self.num_features, dim)
+
+#         nn = Sequential(Linear(5, 128), ReLU(), Linear(128, dim * dim))
+#         self.conv = NNConv(dim, dim, nn, aggr='mean')
+#         self.gru = GRU(dim, dim)
+
+#         self.set2set = Set2Set(dim, processing_steps=3)
+        
+#         self.lin1 = Linear(2 * dim, dim)
+#         self.lin2 = Linear(dim, 1)
+        
+#     def forward(self, x_dict, edge_index_dict, d):
+#         out = F.relu(self.lin0(d['x_i'].x)) #check this
+#         h = out.unsqueeze(0)
+
+#         for i in range(3):
+#             m = F.relu(self.conv(out, d.edge_index, d.edge_attr)) #check this
+#             out, h = self.gru(m.unsqueeze(0), h)
+#             out = out.squeeze(0)
+
+#         out = self.set2set(out, d)
+        
+#         y_i_ = self.lin1(out)
+#         y_j_ = self.lin2(out)
+
+#         logits = self.lin(out).sigmoid()
+#         return logits, y_i_, y_j_
