@@ -12,3 +12,6 @@ __pycache__/
 
 # Jupyter notebook manual save checkpoints
 .ipynb_checkpoints
+
+# ide settings
+.idea
