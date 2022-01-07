@@ -157,7 +157,7 @@ class CoAttention(torch.nn.Module):
     
 class Net(torch.nn.Module):
     def __init__(self, hidden_channels, outer_out_channels, inner_out_channels,
-                 num_layers, batch_size, num_node_types):
+                 num_layers, batch_size):
         super().__init__()
 
         self.batch_size = batch_size
@@ -186,12 +186,10 @@ class Net(torch.nn.Module):
     def forward(self, x_dict, edge_index_dict, d):
 
         x_dict, edge_index_dict = x_dict, edge_index_dict
-
+        
         for conv in self.convs:
             x_dict = conv(x_dict, edge_index_dict)
-            print(x_dict)
-            exit()
-            x_dict = {key: torch.tanh(torch.sum(x.view(-1, self.hidden_channels), dim=1))
+            x_dict = {key: torch.tanh(torch.sum(x.view(-1, self.dim), dim=1))
                       for key, x in x_dict.items()}
 
         p_i = global_add_pool(x_dict['x_i'], batch=d['x_i'].batch, size=self.batch_size).unsqueeze(1).tanh()
