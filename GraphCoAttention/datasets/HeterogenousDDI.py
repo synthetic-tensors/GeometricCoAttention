@@ -52,9 +52,8 @@ class HeteroDrugDrugInteractionData(tg.data.InMemoryDataset, ABC):
             print('Stop download.')
             exit(-1)
 
-    @staticmethod
-    def mol2pyg(molecule):
-        graph = mol.smiles2graph(molecule)
+    def mol2pyg(self, molecule):
+        graph = self.smiles2graph(molecule)
         data = tg.data.Data()
         data.__num_nodes__ = int(graph['num_nodes'])
         data.edge_index = torch.from_numpy(graph['edge_index']).to(torch.int64)
@@ -263,7 +262,7 @@ class HeteroQM9(tg.data.InMemoryDataset, ABC):
 
     @property
     def processed_file_names(self):
-        return 'heterogenous_qm9_norm.pt'
+        return 'heterogenous_qm9_norm2.pt'
 
     def download(self):
         if decide_download(self.url):
