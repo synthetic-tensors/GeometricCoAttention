@@ -400,8 +400,8 @@ class HeteroQM9(tg.data.InMemoryDataset, ABC):
 
             data['x_i', 'outer_edge_ij', 'x_j'].edge_attr = torch.ones(size=(outer_edge_index_i.max() + 1,
                                                                              data_i.edge_attr.size(1)))
-            data['x_j', 'inner_edge_j', 'x_j'].edge_attr = torch.ones(size=(outer_edge_index_j.max() + 1,
-                                                                            data_j.edge_attr.size(1)))
+            data['x_j', 'outer_edge_ji', 'x_i'].edge_attr = torch.ones(size=(outer_edge_index_j.max() + 1,
+                                                                             data_j.edge_attr.size(1)))
 
             data['y_i'].y = data_i.y.float()
             data['y_j'].y = data_j.y.float()
