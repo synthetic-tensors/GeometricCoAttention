@@ -43,7 +43,7 @@ class HeteroDrugDrugInteractionData(tg.data.InMemoryDataset, ABC):
 
     @property
     def processed_file_names(self):
-        return 'heterogenous_decagon_ps_ns_V3.pt'
+        return 'heterogenous_decagon_ps_ns_V4.pt'
 
     def download(self):
         if decide_download(self.url):
@@ -52,9 +52,8 @@ class HeteroDrugDrugInteractionData(tg.data.InMemoryDataset, ABC):
             print('Stop download.')
             exit(-1)
 
-    @staticmethod
-    def mol2pyg(molecule):
-        graph = mol.smiles2graph(molecule)
+    def mol2pyg(self, molecule):
+        graph = self.smiles2graph(molecule)
         data = tg.data.Data()
         data.__num_nodes__ = int(graph['num_nodes'])
         data.edge_index = torch.from_numpy(graph['edge_index']).to(torch.int64)
@@ -178,7 +177,7 @@ class HeteroDrugDrugInteractionData(tg.data.InMemoryDataset, ABC):
             data['x_i', 'outer_edge_ij', 'x_j'].edge_attr = torch.ones(size=(outer_edge_index_i.max()+1,
                                                                              data_i.edge_attr.size(1)))
             data['x_j', 'inner_edge_j', 'x_j'].edge_attr = torch.ones(size=(outer_edge_index_j.max()+1,
-                                                                             data_j.edge_attr.size(1)))
+                                                                            data_j.edge_attr.size(1)))
 
             # data.y = torch.tensor([int(label.strip('C'))], dtype=torch.long)
             data.binary_y = torch.tensor([int(1)], dtype=torch.long)
@@ -206,13 +205,16 @@ class HeteroDrugDrugInteractionData(tg.data.InMemoryDataset, ABC):
                                                                             data_j.edge_attr.size(1)))
 
             # data.y = torch.tensor([int(label.strip('C'))], dtype=torch.long)
+            # data.binary_y = torch.tensor([int(label.strip('C'))], dtype=torch.long)
             data.binary_y = torch.tensor([int(0)], dtype=torch.long)
             data_list.append(data)
+
+        # print([data.binary_y for data in data_list])
+        # exit()
 
         data, slices = self.collate(data_list)
         print('Saving...')
         torch.save((data, slices), self.processed_paths[0])
-
 
 target = 0
 
@@ -420,8 +422,8 @@ class HeteroQM9(tg.data.InMemoryDataset, ABC):
 if __name__ == '__main__':
     import wandb
 
-    # dataset = HeteroDrugDrugInteractionData(root=os.path.join('GraphCoAttention', 'data'))
-    dataset = HeteroQM9(root=os.path.join('GraphCoAttention', 'data'))
+    dataset = HeteroDrugDrugInteractionData(root=os.path.join('GraphCoAttention', 'data'))
+    # dataset = HeteroQM9(root=os.path.join('GraphCoAttention', 'data'))
 
 
     # run = wandb.init(project="flux", entity="syntensor", job_type="dataset-creation")

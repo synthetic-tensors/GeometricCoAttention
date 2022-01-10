@@ -27,7 +27,7 @@ class Learner(pl.LightningModule):
 
         self.num_workers = 32
         self.lr = lr
-        self.num_node_types = len(self.dataset[0].x_dict)
+        # self.num_node_types = len(self.dataset[0].x_dict)
         self.n_cycles = 16
         self.dropout = 0.1
         self.batch_size = 2
@@ -35,7 +35,7 @@ class Learner(pl.LightningModule):
         self.hidden_dim = 25
 
         self.Net = Net(hidden_channels=self.hidden_dim, outer_out_channels=1, inner_out_channels=1, num_layers=self.n_cycles,
-                                                 batch_size=self.batch_size, num_node_types=self.num_node_types)
+                                                 batch_size=self.batch_size)
 
         self.bce_loss = torch.nn.BCEWithLogitsLoss()
         self.mse_loss = torch.nn.MSELoss()

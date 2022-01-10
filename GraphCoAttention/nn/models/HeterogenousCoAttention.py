@@ -164,12 +164,12 @@ class Net(torch.nn.Module):
         self.dim = hidden_channels
 
         nn = Sequential(Linear(5, 128), ReLU(), Linear(128, self.dim * self.dim))
-        
+
         self.convs = torch.nn.ModuleList()
         for _ in range(num_layers):
             conv = HeteroConv({
                 ('x_i', 'inner_edge_i', 'x_i'): NNConv(self.dim, self.dim, nn, aggr='mean'),
-                ('x_j', 'inner_edge_j', 'x_j'): NNConv(self.dim, self.dim, nn, aggr='mean'),
+                 ('x_j', 'inner_edge_j', 'x_j'): NNConv(self.dim, self.dim, nn, aggr='mean'),
                 ('x_i', 'outer_edge_ij', 'x_j'): NNConv(self.dim, self.dim, nn, aggr='mean'),
                 ('x_j', 'outer_edge_ji', 'x_i'): NNConv(self.dim, self.dim, nn, aggr='mean'),
                 ('x_i', 'inner_edge_i', 'x_i'): NNConv(self.dim, self.dim, nn, aggr='mean'),
@@ -184,9 +184,9 @@ class Net(torch.nn.Module):
         
 
     def forward(self, x_dict, edge_index_dict, d):
-
         x_dict, edge_index_dict = x_dict, edge_index_dict
-        
+        print(d)
+
         for conv in self.convs:
             x_dict = conv(x_dict, edge_index_dict)
             x_dict = {key: torch.tanh(torch.sum(x.view(-1, self.dim), dim=1))
